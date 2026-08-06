@@ -271,6 +271,47 @@ def _vector_geometry_issues(
     return issues
 
 
+def _camera_hint(result: dict[str, Any]) -> str:
+    to_name = str(result.get("to_name", "")).lower()
+    from_name = str(result.get("from_name", "")).lower()
+    for candidate in (to_name, from_name):
+        if candidate.endswith("0") or "cam0" in candidate:
+            return "cam0"
+        if candidate.endswith("1") or "cam1" in candidate:
+            return "cam1"
+    return "unknown"
+
+
+def _barcode_keyframe_gap_issues(
+    task_id: str, result: dict[str, Any], sequence: list[dict[str, Any]]
+) -> list[Issue]:
+    frames = sorted(
+        {
+            point.get("frame")
+            for point in sequence
+            if isinstance(point.get("frame"), int) and point.get("frame") >= 0
+        }
+    )
+    issues: list[Issue] = []
+    for previous, current in zip(frames, frames[1:]):
+        gap = current - previous
+        if gap > 3:
+            issues.append(
+                _issue(
+                    task_id,
+                    "OT_BARCODE_KEYFRAME_GAP",
+                    "ignore",
+                    "Barcode 关键帧间隔超过 3 帧，可忽略。",
+                    "Barcode keyframe gap exceeds 3 frames; this can be ignored.",
+                    result,
+                    previous_frame=previous,
+                    frame=current,
+                    gap=gap,
+                )
+            )
+    return issues
+
+
 def check_task(task: dict[str, Any]) -> tuple[list[Issue], Counter[str]]:
     task_id = str(task.get("id", "unknown"))
     issues: list[Issue] = []
@@ -305,8 +346,8 @@ def check_task(task: dict[str, Any]) -> tuple[list[Issue], Counter[str]]:
     rectangles: dict[str, str] = {}
     item_result_ids: set[str] = set()
     barcode_result_ids: set[str] = set()
-    actions_by_item: defaultdict[str, list[str]] = defaultdict(list)
-    products_by_item: defaultdict[str, list[str]] = defaultdict(list)
+    actions_by_item: defaultdict[str, list[tuple[str, str]]] = defaultdict(list)
+    products_by_item: defaultdict[str, list[tuple[str, str]]] = defaultdict(list)
     relations: list[tuple[str, str]] = []
 
     for result in results:
@@ -354,6 +395,8 @@ def check_task(task: dict[str, Any]) -> tuple[list[Issue], Counter[str]]:
                     issues.extend(_geometry_issues(task_id, result, sequence))
                 else:
                     issues.extend(_vector_geometry_issues(task_id, result, sequence))
+                if label.lower() == "barcode":
+                    issues.extend(_barcode_keyframe_gap_issues(task_id, result, sequence))
 
         elif result_type == "relation":
             relations.append((str(result.get("from_id", "")), str(result.get("to_id", ""))))
@@ -363,10 +406,11 @@ def check_task(task: dict[str, Any]) -> tuple[list[Issue], Counter[str]]:
         from_name = str(result.get("from_name", "")).lower()
         choices = [str(value) for value in result.get("value", {}).get("choices", [])]
         item_label = rectangles.get(result_id, result_id)
+        camera = _camera_hint(result)
 
         if "whole_clip" in from_name or "action" in from_name:
-            actions_by_item[item_label].extend(choices)
             for choice in choices:
+                actions_by_item[item_label].append((choice, camera))
                 if choice.strip().lower() not in ALLOWED_ACTIONS:
                     issues.append(
                         _issue(
@@ -380,8 +424,8 @@ def check_task(task: dict[str, Any]) -> tuple[list[Issue], Counter[str]]:
                         )
                     )
         elif "product_type" in from_name:
-            products_by_item[item_label].extend(choices)
             for choice in choices:
+                products_by_item[item_label].append((choice, camera))
                 if choice.strip().lower() not in ALLOWED_PRODUCT_TYPES:
                     issues.append(
                         _issue(
@@ -398,7 +442,33 @@ def check_task(task: dict[str, Any]) -> tuple[list[Issue], Counter[str]]:
     item_labels = {rectangles[result_id] for result_id in item_result_ids}
     for item_label in item_labels:
         actions = actions_by_item.get(item_label, [])
-        if len(actions) != 1:
+        action_cameras = {camera for _, camera in actions}
+        if not actions:
+            issues.append(
+                _issue(
+                    task_id,
+                    "OT_ACTION_COUNT",
+                    "error",
+                    "每个 ITEM 必须且只能有一个 whole-clip action。",
+                    "Each ITEM must have exactly one whole-clip action.",
+                    item=item_label,
+                    action_count=0,
+                )
+            )
+        elif len(action_cameras) > 1:
+            issues.append(
+                _issue(
+                    task_id,
+                    "OT_ACTION_BOTH_CAMERAS",
+                    "error",
+                    "同一 ITEM 在 cam0 和 cam1 都标了 Action；优先只在 cam0 标注。",
+                    "The same ITEM has Action on both cameras; annotate only on cam0 when possible.",
+                    item=item_label,
+                    cameras="|".join(sorted(action_cameras)),
+                    action_count=len(actions),
+                )
+            )
+        elif len(actions) != 1:
             issues.append(
                 _issue(
                     task_id,
@@ -410,8 +480,22 @@ def check_task(task: dict[str, Any]) -> tuple[list[Issue], Counter[str]]:
                     action_count=len(actions),
                 )
             )
+
         products = products_by_item.get(item_label, [])
-        if len(set(products)) > 1:
+        product_values = [value for value, _ in products]
+        product_cameras = {camera for _, camera in products}
+        if not products:
+            issues.append(
+                _issue(
+                    task_id,
+                    "OT_MISSING_PRODUCT_TYPE",
+                    "warning",
+                    "ITEM 缺少商品类型，建议补充。",
+                    "ITEM is missing a product type; please add one.",
+                    item=item_label,
+                )
+            )
+        elif len(set(product_values)) > 1:
             issues.append(
                 _issue(
                     task_id,
@@ -420,7 +504,19 @@ def check_task(task: dict[str, Any]) -> tuple[list[Issue], Counter[str]]:
                     "同一 ITEM 存在冲突的商品类型。",
                     "The same ITEM has conflicting product types.",
                     item=item_label,
-                    product_types="|".join(products),
+                    product_types="|".join(product_values),
+                )
+            )
+        elif len(product_cameras) > 1:
+            issues.append(
+                _issue(
+                    task_id,
+                    "OT_PRODUCT_BOTH_CAMERAS",
+                    "error",
+                    "同一 ITEM 在 cam0 和 cam1 都标了商品类型；优先只在 cam0 标注。",
+                    "The same ITEM has product type on both cameras; annotate only on cam0 when possible.",
+                    item=item_label,
+                    cameras="|".join(sorted(product_cameras)),
                 )
             )
 
@@ -447,9 +543,9 @@ def check_task(task: dict[str, Any]) -> tuple[list[Issue], Counter[str]]:
             _issue(
                 task_id,
                 "OT_ORPHAN_BARCODE",
-                "warning",
-                "Barcode 未关联到 ITEM，建议复核。",
-                "Barcode is not linked to an ITEM; review manually.",
+                "error",
+                "Barcode 未关联到 ITEM。",
+                "Barcode is not linked to an ITEM.",
                 result={"id": barcode_id},
             )
         )

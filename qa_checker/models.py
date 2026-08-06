@@ -4,7 +4,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-Severity = Literal["error", "warning", "info"]
+Severity = Literal["error", "warning", "ignore", "info"]
 ProjectType = Literal["omnitrack", "multiview"]
 
 
@@ -33,6 +33,7 @@ class CheckResult:
     tasks_checked: int = 0
     tasks_with_errors: set[str] = field(default_factory=set)
     tasks_with_warnings: set[str] = field(default_factory=set)
+    tasks_with_ignores: set[str] = field(default_factory=set)
     issue_counts: Counter[str] = field(default_factory=Counter)
     severity_counts: Counter[str] = field(default_factory=Counter)
     metric_counts: Counter[str] = field(default_factory=Counter)
@@ -47,6 +48,8 @@ class CheckResult:
             self.tasks_with_errors.add(issue.task_id)
         elif issue.severity == "warning":
             self.tasks_with_warnings.add(issue.task_id)
+        elif issue.severity == "ignore":
+            self.tasks_with_ignores.add(issue.task_id)
 
         if len(self.issues) < self.max_issues:
             self.issues.append(issue)
@@ -66,9 +69,11 @@ class CheckResult:
             "tasks_checked": self.tasks_checked,
             "tasks_with_errors": len(self.tasks_with_errors),
             "tasks_with_warnings": len(self.tasks_with_warnings),
+            "tasks_with_ignores": len(self.tasks_with_ignores),
             "hard_pass_rate": round(self.hard_pass_rate, 4),
             "error_count": self.severity_counts["error"],
             "warning_count": self.severity_counts["warning"],
+            "ignore_count": self.severity_counts["ignore"],
             "info_count": self.severity_counts["info"],
             "issues_truncated": self.issues_truncated,
         }

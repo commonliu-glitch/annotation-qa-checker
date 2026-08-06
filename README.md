@@ -76,10 +76,12 @@ Multiview：
 
 - `error`：结构或逻辑明确违反规则，会计入硬规则不通过。
 - `warning`：高风险信号，需要人工查看，不能直接判定标错。
+- `ignore`：可忽略的提示，不计入硬规则通过率。
 - `info`：统计信息。
 
 - `error`: a definite structural or logical rule violation.
 - `warning`: a risk signal requiring human review.
+- `ignore`: an ignorable signal that does not affect the hard-rule pass rate.
 - `info`: statistical information.
 
 工具无法仅凭导出 JSON 判断轮廓是否偏离真实物体 15%–20%、动作语义是否正确、是否误框手/背景、货架物品是否应被排除。这些场景仍需人工抽检。

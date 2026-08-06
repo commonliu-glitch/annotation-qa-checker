@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from itertools import chain
-from typing import BinaryIO, Callable, Literal
+from typing import BinaryIO, Callable, Literal, Optional
 
 from qa_checker.models import CheckResult, ProjectType
 from qa_checker.parsers import detect_project_type, iter_tasks
 from qa_checker.rules import multiview, omnitrack
 
-ProgressCallback = Callable[[int], None]
+ProgressCallback = Callable[[int, Optional[int]], None]
 
 
 def run_check(
@@ -17,6 +17,7 @@ def run_check(
     task_limit: int = 0,
     max_issues: int = 50_000,
     progress_callback: ProgressCallback | None = None,
+    progress_every: int = 25,
 ) -> CheckResult:
     tasks = iter_tasks(stream)
     try:
@@ -37,6 +38,8 @@ def run_check(
         max_issues=max_issues,
     )
     checker = omnitrack.check_task if selected_type == "omnitrack" else multiview.check_task
+    expected_total = task_limit if task_limit > 0 else None
+    update_every = max(1, progress_every)
 
     for task in chain([first_task], tasks):
         if task_limit and result.tasks_checked >= task_limit:
@@ -46,9 +49,11 @@ def run_check(
         for issue in issues:
             result.add_issue(issue)
         result.metric_counts.update(metrics)
-        if progress_callback and result.tasks_checked % 250 == 0:
-            progress_callback(result.tasks_checked)
+        if progress_callback and (
+            result.tasks_checked == 1 or result.tasks_checked % update_every == 0
+        ):
+            progress_callback(result.tasks_checked, expected_total)
 
     if progress_callback:
-        progress_callback(result.tasks_checked)
+        progress_callback(result.tasks_checked, expected_total)
     return result

@@ -257,3 +257,197 @@ def test_uploaded_gzip_stream_is_checked() -> None:
 
     assert result.project_type == "multiview"
     assert result.tasks_checked == 1
+
+
+def test_orphan_barcode_is_error() -> None:
+    task = {
+        "id": 105,
+        "data": {"video_url0": "a", "video_url1": "b"},
+        "annotations": _annotation(
+            [
+                {
+                    "id": "item-1",
+                    "type": "videovectorlabels",
+                    "to_name": "cam0",
+                    "value": {
+                        "videovectorlabels": ["ITEM1"],
+                        "sequence": [
+                            {
+                                "frame": 1,
+                                "vertices": [
+                                    {"x": 10, "y": 10},
+                                    {"x": 20, "y": 10},
+                                    {"x": 20, "y": 20},
+                                ],
+                            }
+                        ],
+                    },
+                },
+                {
+                    "id": "item-1",
+                    "type": "choices",
+                    "from_name": "whole_clip0",
+                    "to_name": "cam0",
+                    "value": {"choices": ["add"]},
+                },
+                {
+                    "id": "item-1",
+                    "type": "choices",
+                    "from_name": "product_type0",
+                    "to_name": "cam0",
+                    "value": {"choices": ["barcoded item"]},
+                },
+                {
+                    "id": "barcode-1",
+                    "type": "videorectangle",
+                    "to_name": "cam0",
+                    "value": {
+                        "labels": ["Barcode"],
+                        "sequence": [
+                            {"frame": 1, "x": 12, "y": 12, "width": 3, "height": 2}
+                        ],
+                    },
+                },
+            ]
+        ),
+    }
+
+    result = run_check(_stream([task]), "omni.json")
+
+    assert result.issue_counts["OT_ORPHAN_BARCODE"] == 1
+    assert "105" in result.tasks_with_errors
+
+
+def test_barcode_keyframe_gap_is_ignore() -> None:
+    task = {
+        "id": 106,
+        "data": {"video_url0": "a", "video_url1": "b"},
+        "annotations": _annotation(
+            [
+                {
+                    "id": "item-1",
+                    "type": "videovectorlabels",
+                    "to_name": "cam0",
+                    "value": {
+                        "videovectorlabels": ["ITEM1"],
+                        "sequence": [
+                            {
+                                "frame": 1,
+                                "vertices": [
+                                    {"x": 10, "y": 10},
+                                    {"x": 20, "y": 10},
+                                    {"x": 20, "y": 20},
+                                ],
+                            }
+                        ],
+                    },
+                },
+                {
+                    "id": "item-1",
+                    "type": "choices",
+                    "from_name": "whole_clip0",
+                    "to_name": "cam0",
+                    "value": {"choices": ["add"]},
+                },
+                {
+                    "id": "item-1",
+                    "type": "choices",
+                    "from_name": "product_type0",
+                    "to_name": "cam0",
+                    "value": {"choices": ["barcoded item"]},
+                },
+                {
+                    "id": "barcode-1",
+                    "type": "videorectangle",
+                    "to_name": "cam0",
+                    "value": {
+                        "labels": ["Barcode"],
+                        "sequence": [
+                            {"frame": 1, "x": 12, "y": 12, "width": 3, "height": 2},
+                            {"frame": 8, "x": 13, "y": 13, "width": 3, "height": 2},
+                        ],
+                    },
+                },
+                {
+                    "type": "relation",
+                    "from_id": "barcode-1",
+                    "to_id": "item-1",
+                },
+            ]
+        ),
+    }
+
+    result = run_check(_stream([task]), "omni.json")
+
+    assert result.issue_counts["OT_BARCODE_KEYFRAME_GAP"] == 1
+    assert result.severity_counts["ignore"] == 1
+    assert not result.tasks_with_errors
+    assert result.hard_pass_rate == 1.0
+
+
+def test_action_on_both_cameras_and_missing_product_type() -> None:
+    task = {
+        "id": 107,
+        "data": {"video_url0": "a", "video_url1": "b"},
+        "annotations": _annotation(
+            [
+                {
+                    "id": "item-cam0",
+                    "type": "videovectorlabels",
+                    "to_name": "cam0",
+                    "value": {
+                        "videovectorlabels": ["ITEM1"],
+                        "sequence": [
+                            {
+                                "frame": 1,
+                                "vertices": [
+                                    {"x": 10, "y": 10},
+                                    {"x": 20, "y": 10},
+                                    {"x": 20, "y": 20},
+                                ],
+                            }
+                        ],
+                    },
+                },
+                {
+                    "id": "item-cam1",
+                    "type": "videovectorlabels",
+                    "to_name": "cam1",
+                    "value": {
+                        "videovectorlabels": ["ITEM1"],
+                        "sequence": [
+                            {
+                                "frame": 1,
+                                "vertices": [
+                                    {"x": 11, "y": 11},
+                                    {"x": 21, "y": 11},
+                                    {"x": 21, "y": 21},
+                                ],
+                            }
+                        ],
+                    },
+                },
+                {
+                    "id": "item-cam0",
+                    "type": "choices",
+                    "from_name": "whole_clip0",
+                    "to_name": "cam0",
+                    "value": {"choices": ["add"]},
+                },
+                {
+                    "id": "item-cam1",
+                    "type": "choices",
+                    "from_name": "whole_clip1",
+                    "to_name": "cam1",
+                    "value": {"choices": ["add"]},
+                },
+            ]
+        ),
+    }
+
+    result = run_check(_stream([task]), "omni.json")
+
+    assert result.issue_counts["OT_ACTION_BOTH_CAMERAS"] == 1
+    assert result.issue_counts["OT_MISSING_PRODUCT_TYPE"] == 1
+    assert "107" in result.tasks_with_errors
+    assert "107" in result.tasks_with_warnings

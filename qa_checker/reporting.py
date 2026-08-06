@@ -40,13 +40,16 @@ def report_payload(result: CheckResult) -> dict[str, Any]:
         "review_samples": dict(sample_by_code),
         "notes": {
             "zh": (
-                "硬规则通过率只反映结构和逻辑检查；轮廓贴合、动作语义、"
+                "硬规则通过率只反映 error；warning 需人工复核；"
+                "ignore 可忽略且不计入通过率。轮廓贴合、动作语义、"
                 "手/背景误入等仍需人工复核。报告不包含标注员邮箱。"
             ),
             "en": (
-                "The hard-rule pass rate covers structural and logical checks only. "
-                "Geometry fit, action semantics, and hand/background inclusion still "
-                "require human review. Annotator emails are excluded."
+                "The hard-rule pass rate counts only error issues. "
+                "warning requires human review; ignore can be skipped and "
+                "does not affect the pass rate. Geometry fit, action semantics, "
+                "and hand/background inclusion still require human review. "
+                "Annotator emails are excluded."
             ),
         },
     }
