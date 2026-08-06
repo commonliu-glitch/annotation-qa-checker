@@ -1,0 +1,60 @@
+from __future__ import annotations
+
+import csv
+import io
+import json
+from collections import defaultdict
+from typing import Any
+
+from qa_checker.models import CheckResult
+
+
+def issues_csv_bytes(result: CheckResult) -> bytes:
+    output = io.StringIO()
+    fieldnames = [
+        "task_id",
+        "result_id",
+        "severity",
+        "code",
+        "message_zh",
+        "message_en",
+        "details",
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for issue in result.issues:
+        writer.writerow(issue.to_dict())
+    return output.getvalue().encode("utf-8-sig")
+
+
+def report_payload(result: CheckResult) -> dict[str, Any]:
+    sample_by_code: defaultdict[str, list[str]] = defaultdict(list)
+    for issue in result.issues:
+        if len(sample_by_code[issue.code]) < 20:
+            sample_by_code[issue.code].append(issue.task_id)
+
+    return {
+        "summary": result.summary(),
+        "issue_counts": dict(result.issue_counts.most_common()),
+        "metrics": dict(result.metric_counts),
+        "review_samples": dict(sample_by_code),
+        "notes": {
+            "zh": (
+                "硬规则通过率只反映结构和逻辑检查；轮廓贴合、动作语义、"
+                "手/背景误入等仍需人工复核。报告不包含标注员邮箱。"
+            ),
+            "en": (
+                "The hard-rule pass rate covers structural and logical checks only. "
+                "Geometry fit, action semantics, and hand/background inclusion still "
+                "require human review. Annotator emails are excluded."
+            ),
+        },
+    }
+
+
+def report_json_bytes(result: CheckResult) -> bytes:
+    return json.dumps(
+        report_payload(result),
+        ensure_ascii=False,
+        indent=2,
+    ).encode("utf-8")

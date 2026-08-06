@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "annotation-qa-checker"
+version = "0.1.0"
+description = "Local quality gate for OmniTrack and Multiview Label Studio exports"
+requires-python = ">=3.9"
+dependencies = [
+  "ijson>=3.3",
+  "streamlit>=1.40",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
