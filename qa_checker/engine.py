@@ -4,7 +4,7 @@ from itertools import chain
 from typing import BinaryIO, Callable, Literal, Optional
 
 from qa_checker.models import CheckResult, ProjectType
-from qa_checker.parsers import detect_project_type, iter_tasks
+from qa_checker.parsers import detect_project_type, iter_tasks, latest_reviewer_action
 from qa_checker.rules import multiview, omnitrack
 
 ProgressCallback = Callable[[int, Optional[int]], None]
@@ -45,6 +45,9 @@ def run_check(
         if task_limit and result.tasks_checked >= task_limit:
             break
         result.tasks_checked += 1
+        reviewer_action = latest_reviewer_action(task)
+        if reviewer_action is not None:
+            result.reviewer_action_counts[reviewer_action] += 1
         issues, metrics = checker(task)
         for issue in issues:
             result.add_issue(issue)

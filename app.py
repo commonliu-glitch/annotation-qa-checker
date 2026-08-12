@@ -33,6 +33,10 @@ def _progress_ratio(checked: int, expected_total):
     return min(0.99, 1 - (0.985 ** max(checked, 1)))
 
 
+def _format_percentage(value: float) -> str:
+    return f"{value:.2%}" if 0 < value < 0.01 else f"{value:.1%}"
+
+
 st.set_page_config(page_title="Annotation QA Checker", page_icon="✓", layout="wide")
 require_authentication()
 
@@ -194,17 +198,52 @@ if st.button("开始检查 / Run QA", type="primary"):
 result = st.session_state.get("check_result")
 if result is not None:
     summary = result.summary()
-    st.subheader("结果概览 / Summary")
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("已检查 / Checked", f"{summary['tasks_checked']:,}")
-    col2.metric("硬规则通过率 / Pass rate", f"{summary['hard_pass_rate']:.1%}")
-    col3.metric("错误任务 / Error tasks", f"{summary['tasks_with_errors']:,}")
-    col4.metric("风险任务 / Warning tasks", f"{summary['tasks_with_warnings']:,}")
-    col5.metric("可忽略 / Ignore", f"{summary['ignore_count']:,}")
-    st.caption(
-        "severity 说明：error=必须修复；warning=建议人工复核；"
-        "ignore=可忽略，不计入硬规则通过率。"
+    st.subheader("质量 Dashboard / Quality Dashboard")
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    reviewer_rate = summary["reviewer_not_returned_rate"]
+    col1.metric(
+        "Reviewer 未打回率 / No-return rate",
+        _format_percentage(reviewer_rate)
+        if reviewer_rate is not None
+        else "暂无 / N/A",
     )
+    col2.metric(
+        "Reviewer 检查覆盖率 / Coverage",
+        _format_percentage(summary["reviewer_coverage_rate"]),
+    )
+    col3.metric(
+        "Reviewer 已检查 / Reviewed",
+        f"{summary['reviewer_checked_count']:,}",
+    )
+    col4.metric(
+        "自动规则通过率 / Automated pass rate",
+        _format_percentage(summary["hard_pass_rate"]),
+    )
+    col5.metric("错误任务 / Error tasks", f"{summary['tasks_with_errors']:,}")
+    col6.metric("风险任务 / Warning tasks", f"{summary['tasks_with_warnings']:,}")
+    st.caption(
+        f"工具共检查 {summary['tasks_checked']:,} 个任务。Reviewer 未打回率"
+        "=（accepted + fixed_and_accepted）÷（accepted + fixed_and_accepted + "
+        "rejected）；Reviewer 检查覆盖率=Reviewer 已检查数÷工具检查任务数；"
+        "自动规则通过率=无 error 的任务数÷工具检查任务数。"
+    )
+    if int(task_limit) > 0:
+        st.caption(
+            "当前设置了任务数量上限，Reviewer 检查覆盖率仅代表本次抽样范围；"
+            "将“最多检查任务数”设为 0 后重新运行，才是整个导出文件的覆盖率。"
+        )
+
+    reviewer_checked = summary["reviewer_checked_count"]
+    if reviewer_checked == 0:
+        st.info(
+            "暂无 Reviewer 最终审核记录；自动规则结果仍可正常使用。"
+            " / No final reviewer actions found."
+        )
+    elif reviewer_checked < 30:
+        st.warning(
+            f"Reviewer 当前仅检查 {reviewer_checked:,} 个任务，样本量较小；"
+            "解读未打回率时请同时关注检查数量。"
+        )
 
     if result.issues_truncated:
         st.warning(
@@ -212,12 +251,68 @@ if result is not None:
             " / Issue rows were truncated, while aggregate counts remain complete."
         )
 
-    st.subheader("问题分布 / Issue distribution")
-    issue_rows = [
-        {"code": code, "count": count}
-        for code, count in result.issue_counts.most_common()
+    reviewer_rows = [
+        {
+            "状态 / Status": label,
+            "任务数 / Tasks": result.reviewer_action_counts[action],
+        }
+        for action, label in (
+            ("accepted", "直接接受 / Accepted"),
+            ("fixed_and_accepted", "修正后接受 / Fixed and accepted"),
+            ("rejected", "打回 / Rejected"),
+        )
+        if result.reviewer_action_counts[action] > 0
     ]
-    st.dataframe(issue_rows, width="stretch", hide_index=True)
+    severity_rows = [
+        {"严重级别 / Severity": severity, "问题数 / Issues": count}
+        for severity, count in (
+            ("error", summary["error_count"]),
+            ("warning", summary["warning_count"]),
+            ("ignore", summary["ignore_count"]),
+            ("info", summary["info_count"]),
+        )
+        if count > 0
+    ]
+
+    chart_left, chart_right = st.columns(2)
+    with chart_left:
+        st.subheader("Reviewer 状态 / Reviewer status")
+        if reviewer_rows:
+            st.bar_chart(
+                reviewer_rows,
+                x="状态 / Status",
+                y="任务数 / Tasks",
+                use_container_width=True,
+            )
+        else:
+            st.caption("暂无数据 / No data")
+    with chart_right:
+        st.subheader("严重级别分布 / Severity distribution")
+        if severity_rows:
+            st.bar_chart(
+                severity_rows,
+                x="严重级别 / Severity",
+                y="问题数 / Issues",
+                use_container_width=True,
+            )
+        else:
+            st.caption("未发现问题 / No issues found")
+
+    st.subheader("Top 10 自动规则问题 / Top 10 automated issues")
+    issue_rows = [
+        {"规则代码 / Rule": code, "问题数 / Issues": count}
+        for code, count in result.issue_counts.most_common(10)
+    ]
+    if issue_rows:
+        st.bar_chart(
+            issue_rows,
+            x="规则代码 / Rule",
+            y="问题数 / Issues",
+            use_container_width=True,
+        )
+        st.dataframe(issue_rows, width="stretch", hide_index=True)
+    else:
+        st.success("未发现自动规则问题 / No automated rule issues found.")
 
     st.subheader("数据指标 / Data metrics")
     metric_rows = [

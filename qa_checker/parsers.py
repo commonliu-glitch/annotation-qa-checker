@@ -77,6 +77,32 @@ def latest_annotation(task: dict[str, Any]) -> dict[str, Any] | None:
     )
 
 
+def latest_reviewer_action(task: dict[str, Any]) -> str | None:
+    """Return the latest final reviewer action without retaining reviewer identity."""
+    reviewed_annotations: list[tuple[dict[str, Any], str]] = []
+    for item in task.get("annotations", []):
+        if not isinstance(item, dict):
+            continue
+        action = str(item.get("last_action") or "").strip().lower()
+        if action not in {"accepted", "fixed_and_accepted", "rejected"}:
+            if item.get("accepted") is True:
+                action = "accepted"
+            else:
+                continue
+        reviewed_annotations.append((item, action))
+
+    if not reviewed_annotations:
+        return None
+    _, action = max(
+        reviewed_annotations,
+        key=lambda pair: (
+            str(pair[0].get("updated_at") or pair[0].get("created_at") or ""),
+            int(pair[0].get("id") or 0),
+        ),
+    )
+    return action
+
+
 def annotation_results(task: dict[str, Any]) -> list[dict[str, Any]]:
     annotation = latest_annotation(task)
     if annotation is None:

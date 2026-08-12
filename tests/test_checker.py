@@ -6,6 +6,7 @@ import json
 
 from qa_checker.engine import run_check
 from qa_checker.parsers import resolve_local_path, uploaded_task_stream
+from qa_checker.reporting import report_payload
 
 
 def _stream(tasks: list[dict]) -> io.BytesIO:
@@ -14,6 +15,34 @@ def _stream(tasks: list[dict]) -> io.BytesIO:
 
 def _annotation(results: list[dict]) -> list[dict]:
     return [{"id": 1, "updated_at": "2026-01-01", "result": results}]
+
+
+def _multiview_task(task_id: int, last_action: str | None = None) -> dict:
+    annotation = {
+        "id": task_id,
+        "updated_at": "2026-01-01",
+        "result": [
+            {
+                "id": f"bbox-{task_id}",
+                "type": "rectanglelabels",
+                "to_name": "imgA",
+                "value": {
+                    "x": 10,
+                    "y": 10,
+                    "width": 20,
+                    "height": 20,
+                    "rectanglelabels": ["item"],
+                },
+            }
+        ],
+    }
+    if last_action is not None:
+        annotation["last_action"] = last_action
+    return {
+        "id": task_id,
+        "data": {"imageA": "a", "imageB": "b"},
+        "annotations": [annotation],
+    }
 
 
 def test_valid_omnitrack_task_passes_hard_rules() -> None:
@@ -451,3 +480,38 @@ def test_action_on_both_cameras_and_missing_product_type() -> None:
     assert result.issue_counts["OT_MISSING_PRODUCT_TYPE"] == 1
     assert "107" in result.tasks_with_errors
     assert "107" in result.tasks_with_warnings
+
+
+def test_reviewer_not_returned_rate_uses_final_review_actions() -> None:
+    tasks = [
+        _multiview_task(301, "accepted"),
+        _multiview_task(302, "fixed_and_accepted"),
+        _multiview_task(303, "rejected"),
+        _multiview_task(304, "skipped"),
+        _multiview_task(305),
+    ]
+
+    result = run_check(_stream(tasks), "reviewed.json")
+    summary = result.summary()
+
+    assert result.reviewer_action_counts == {
+        "accepted": 1,
+        "fixed_and_accepted": 1,
+        "rejected": 1,
+    }
+    assert summary["reviewer_checked_count"] == 3
+    assert summary["reviewer_coverage_rate"] == 0.6
+    assert summary["reviewer_not_returned_count"] == 2
+    assert summary["reviewer_not_returned_rate"] == 0.6667
+    assert summary["reviewer_fixed_and_accepted_count"] == 1
+    assert result.hard_pass_rate == 1.0
+    assert report_payload(result)["reviewer_actions"]["rejected"] == 1
+
+
+def test_reviewer_rate_is_none_when_no_tasks_were_reviewed() -> None:
+    result = run_check(_stream([_multiview_task(306, "skipped")]), "unreviewed.json")
+
+    assert result.reviewer_checked_count == 0
+    assert result.reviewer_coverage_rate == 0.0
+    assert result.reviewer_not_returned_rate is None
+    assert result.summary()["reviewer_not_returned_rate"] is None

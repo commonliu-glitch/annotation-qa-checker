@@ -35,17 +35,24 @@ def report_payload(result: CheckResult) -> dict[str, Any]:
 
     return {
         "summary": result.summary(),
+        "reviewer_actions": dict(result.reviewer_action_counts),
         "issue_counts": dict(result.issue_counts.most_common()),
         "metrics": dict(result.metric_counts),
         "review_samples": dict(sample_by_code),
         "notes": {
             "zh": (
-                "硬规则通过率只反映 error；warning 需人工复核；"
+                "Reviewer 未打回率统计 accepted 和 fixed_and_accepted；"
+                "Reviewer 检查覆盖率为已检查任务数除以工具检查任务数；"
+                "自动规则通过率只反映 error；warning 需人工复核；"
                 "ignore 可忽略且不计入通过率。轮廓贴合、动作语义、"
                 "手/背景误入等仍需人工复核。报告不包含标注员邮箱。"
             ),
             "en": (
-                "The hard-rule pass rate counts only error issues. "
+                "The reviewer no-return rate includes accepted and "
+                "fixed_and_accepted tasks. Reviewer coverage is the reviewed "
+                "task count divided by the tool-checked task count. "
+                "The automated pass rate counts "
+                "only error issues. "
                 "warning requires human review; ignore can be skipped and "
                 "does not affect the pass rate. Geometry fit, action semantics, "
                 "and hand/background inclusion still require human review. "
